@@ -92,7 +92,7 @@ app.get('/api/products', async (req, res) => {
     if (date && !postId) {
       const [day, month, year] = date.split('/');
       const formattedDate = `${year}-${month}-${day}`;
-      conditions.push(`DATE(p.post_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Ho_Chi_Minh') = $${paramIndex}`);
+      conditions.push(`DATE(p.post_time) = $${paramIndex}`);
       params.push(formattedDate);
       paramIndex++;
     }

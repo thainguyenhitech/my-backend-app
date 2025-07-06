@@ -5,10 +5,9 @@ const moment = require('moment-timezone');
 
 const app = express();
 
-app.use(cors()); // Cho phép tất cả origin
+app.use(cors());
 app.use(express.json());
 
-// Chỉ sử dụng một kết nối đến mygrandpark
 const pool = new Pool({
   user: process.env.DB_USER,
   host: process.env.DB_HOST,
@@ -17,7 +16,6 @@ const pool = new Pool({
   port: parseInt(process.env.DB_PORT || 5432),
 });
 
-// API lấy sản phẩm (đã sửa để cố định múi giờ Asia/Ho_Chi_Minh)
 app.get('/api/products', async (req, res) => {
   const limit = parseInt(req.query.limit) || 6;
   const categoryId = parseInt(req.query.category_id);

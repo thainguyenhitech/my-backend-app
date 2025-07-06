@@ -83,21 +83,19 @@ app.get('/api/products', async (req, res) => {
     }
 
     if (lastPostTime && !isNaN(new Date(lastPostTime).getTime()) && !postId) {
-      // Chuyển lastPostTime từ UTC sang Asia/Ho_Chi_Minh bằng cách trừ 7 giờ thủ công
-      const lastPostTimeUTC = new Date(lastPostTime);
-      lastPostTimeUTC.setHours(lastPostTimeUTC.getHours() - 7); // Trừ 7 giờ
+      const lastPostTimeHoChiMinh = moment.utc(lastPostTime)
+        .tz('Asia/Ho_Chi_Minh')
+        .toISOString();
       conditions.push(`p.post_time < $${paramIndex}`);
-      params.push(lastPostTimeUTC.toISOString());
+      params.push(lastPostTimeHoChiMinh);
       paramIndex++;
     }
 
     if (date && !postId) {
-      // Chuyển date từ định dạng DD/MM/YYYY sang ngày theo Asia/Ho_Chi_Minh (trừ 7 giờ từ UTC)
-      const [day, month, year] = date.split('/');
-      const hoChiMinhDate = new Date(`${year}-${month}-${day}T00:00:00Z`);
-      hoChiMinhDate.setHours(hoChiMinhDate.getHours() - 7); // Trừ 7 giờ
+      const hoChiMinhDate = moment.tz(`${date} 00:00:00`, 'DD/MM/YYYY HH:mm:ss', 'Asia/Ho_Chi_Minh')
+        .toISOString();
       conditions.push(`DATE(p.post_time) = $${paramIndex}`);
-      params.push(hoChiMinhDate.toISOString().slice(0, 10));
+      params.push(hoChiMinhDate.slice(0, 10));
       paramIndex++;
     }
 

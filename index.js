@@ -1,7 +1,6 @@
 const express = require('express');
 const { Pool } = require('pg');
 const cors = require('cors');
-const moment = require('moment-timezone');
 
 const app = express();
 
@@ -21,8 +20,7 @@ app.get('/api/products', async (req, res) => {
   const categoryId = parseInt(req.query.category_id);
   const subcategoryId = parseInt(req.query.subcategory_id);
   const searchTerm = req.query.search;
-  const lastPostTime = req.query.last_post_time || null;
-  const date = req.query.date || null;
+  const date = req.query.date || null; // Chỉ dùng date để lọc theo ngày
   const postId = req.query.post_id;
 
   try {
@@ -81,21 +79,18 @@ app.get('/api/products', async (req, res) => {
       paramIndex++;
     }
 
-    if (lastPostTime && !isNaN(new Date(lastPostTime).getTime()) && !postId) {
-      const lastPostTimeHoChiMinh = moment.utc(lastPostTime)
-        .tz('Asia/Ho_Chi_Minh')
-        .toISOString();
-      conditions.push(`p.post_time < $${paramIndex}`);
-      params.push(lastPostTimeHoChiMinh);
-      paramIndex++;
-    }
-
     if (date && !postId) {
-      const hoChiMinhDate = moment.tz(`${date} 00:00:00`, 'DD/MM/YYYY HH:mm:ss', 'Asia/Ho_Chi_Minh')
-        .toISOString();
-      conditions.push(`DATE(p.post_time) = $${paramIndex}`);
-      params.push(hoChiMinhDate.slice(0, 10));
-      paramIndex++;
+      // Chuyển date từ DD/MM/YYYY sang khoảng thời gian theo Asia/Ho_Chi_Minh (trừ 7 giờ từ UTC)
+      const [day, month, year] = date.split('/');
+      const startDateUTC = new Date(`${year}-${month}-${day}T00:00:00Z`); // Bắt đầu ngày UTC
+      const endDateUTC = new Date(`${year}-${month}-${day}T23:59:59Z`);   // Kết thúc ngày UTC
+      startDateUTC.setHours(startDateUTC.getHours() - 7); // Trừ 7 giờ cho Asia/Ho_Chi_Minh
+      endDateUTC.setHours(endDateUTC.getHours() - 7);     // Trừ 7 giờ cho Asia/Ho_Chi_Minh
+
+      conditions.push(`p.post_time >= $${paramIndex} AND p.post_time <= $${paramIndex + 1}`);
+      params.push(startDateUTC.toISOString());
+      params.push(endDateUTC.toISOString());
+      paramIndex += 2;
     }
 
     if (conditions.length > 0) {

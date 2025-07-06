@@ -24,7 +24,7 @@ app.get('/api/products', async (req, res) => {
   const searchTerm = req.query.search;
   const lastPostTime = req.query.last_post_time || null;
   const date = req.query.date || null;
-  const postId = req.query.post_id; // Giữ dạng chuỗi
+  const postId = req.query.post_id;
 
   try {
     let query = `
@@ -32,7 +32,7 @@ app.get('/api/products', async (req, res) => {
              p.post_product AS product_name, 
              p.minimum_price AS price, 
              p.post_thumbnail,
-             p.post_time AT TIME ZONE 'Asia/Ho_Chi_Minh' AS post_time, -- Cố định múi giờ Asia/Ho_Chi_Minh
+             p.post_time AS post_time, -- Trả về UTC trực tiếp
              u.name AS user_name,
              p.user_id,
              u.phone AS user_phone, 
@@ -83,17 +83,21 @@ app.get('/api/products', async (req, res) => {
     }
 
     if (lastPostTime && !isNaN(new Date(lastPostTime).getTime()) && !postId) {
-      const formattedLastPostTime = new Date(lastPostTime).toISOString();
+      // Chuyển lastPostTime từ UTC sang Asia/Ho_Chi_Minh bằng cách trừ 7 giờ thủ công
+      const lastPostTimeUTC = new Date(lastPostTime);
+      lastPostTimeUTC.setHours(lastPostTimeUTC.getHours() - 7); // Trừ 7 giờ
       conditions.push(`p.post_time < $${paramIndex}`);
-      params.push(formattedLastPostTime);
+      params.push(lastPostTimeUTC.toISOString());
       paramIndex++;
     }
 
     if (date && !postId) {
+      // Chuyển date từ định dạng DD/MM/YYYY sang ngày theo Asia/Ho_Chi_Minh (trừ 7 giờ từ UTC)
       const [day, month, year] = date.split('/');
-      const formattedDate = `${year}-${month}-${day}`;
+      const hoChiMinhDate = new Date(`${year}-${month}-${day}T00:00:00Z`);
+      hoChiMinhDate.setHours(hoChiMinhDate.getHours() - 7); // Trừ 7 giờ
       conditions.push(`DATE(p.post_time) = $${paramIndex}`);
-      params.push(formattedDate);
+      params.push(hoChiMinhDate.toISOString().slice(0, 10));
       paramIndex++;
     }
 
@@ -115,8 +119,8 @@ app.get('/api/products', async (req, res) => {
     const result = await pool.query(query, params);
     const products = result.rows.map(row => ({
       ...row,
-      product_name: row.product_name || [], // post_product là jsonb, không cần parse
-      post_images: row.post_images || [] // post_images là text[], không cần parse
+      product_name: row.product_name || [],
+      post_images: row.post_images || []
     }));
     res.json(products);
   } catch (error) {

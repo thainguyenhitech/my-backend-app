@@ -16,7 +16,7 @@ const pool = new Pool({
   port: parseInt(process.env.DB_PORT || 5432),
 });
 
-// API lấy sản phẩm (đã sửa để xử lý múi giờ)
+// API lấy sản phẩm (đã sửa để cố định múi giờ Asia/Ho_Chi_Minh)
 app.get('/api/products', async (req, res) => {
   const limit = parseInt(req.query.limit) || 6;
   const categoryId = parseInt(req.query.category_id);
@@ -25,7 +25,6 @@ app.get('/api/products', async (req, res) => {
   const lastPostTime = req.query.last_post_time || null;
   const date = req.query.date || null;
   const postId = req.query.post_id; // Giữ dạng chuỗi
-  const timezone = req.query.timezone || 'Asia/Ho_Chi_Minh'; // Mặc định +07:00
 
   try {
     let query = `
@@ -33,7 +32,7 @@ app.get('/api/products', async (req, res) => {
              p.post_product AS product_name, 
              p.minimum_price AS price, 
              p.post_thumbnail,
-             p.post_time AT TIME ZONE $6 AS post_time, -- Chuyển đổi múi giờ
+             p.post_time AT TIME ZONE 'Asia/Ho_Chi_Minh' AS post_time, -- Cố định múi giờ Asia/Ho_Chi_Minh
              u.name AS user_name,
              p.user_id,
              u.phone AS user_phone, 
@@ -109,7 +108,6 @@ app.get('/api/products', async (req, res) => {
       LIMIT $${paramIndex}
     `;
     params.push(limit);
-    params.push(timezone); // Thêm timezone vào params
 
     console.log('[DEBUG] Query:', query);
     console.log('[DEBUG] Params:', params);

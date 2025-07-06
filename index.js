@@ -20,7 +20,8 @@ app.get('/api/products', async (req, res) => {
   const categoryId = parseInt(req.query.category_id);
   const subcategoryId = parseInt(req.query.subcategory_id);
   const searchTerm = req.query.search;
-  const date = req.query.date || null; // Chỉ dùng date để lọc theo ngày
+  const date = req.query.date || null;             // DD/MM/YYYY
+  const lastPostTime = req.query.last_post_time;   // ISO string từ client
   const postId = req.query.post_id;
 
   try {
@@ -29,7 +30,7 @@ app.get('/api/products', async (req, res) => {
              p.post_product AS product_name, 
              p.minimum_price AS price, 
              p.post_thumbnail,
-             p.post_time AS post_time, -- Trả về UTC trực tiếp
+             p.post_time AS post_time, 
              u.name AS user_name,
              p.user_id,
              u.phone AS user_phone, 
@@ -45,8 +46,9 @@ app.get('/api/products', async (req, res) => {
       LEFT JOIN categories c ON c.id = p.category_id
       LEFT JOIN "user" u ON p.user_id = u.id
     `;
+
     const params = [];
-    let conditions = [];
+    const conditions = [];
     let paramIndex = 1;
 
     if (postId) {
@@ -80,17 +82,22 @@ app.get('/api/products', async (req, res) => {
     }
 
     if (date && !postId) {
-      // Chuyển date từ DD/MM/YYYY sang khoảng thời gian theo Asia/Ho_Chi_Minh (trừ 7 giờ từ UTC)
       const [day, month, year] = date.split('/');
-      const startDateUTC = new Date(`${year}-${month}-${day}T00:00:00Z`); // Bắt đầu ngày UTC
-      const endDateUTC = new Date(`${year}-${month}-${day}T23:59:59Z`);   // Kết thúc ngày UTC
-      startDateUTC.setHours(startDateUTC.getHours() - 7); // Trừ 7 giờ cho Asia/Ho_Chi_Minh
-      endDateUTC.setHours(endDateUTC.getHours() - 7);     // Trừ 7 giờ cho Asia/Ho_Chi_Minh
+      const startDateUTC = new Date(`${year}-${month}-${day}T00:00:00Z`);
+      const endDateUTC = new Date(`${year}-${month}-${day}T23:59:59Z`);
+      startDateUTC.setHours(startDateUTC.getHours() - 7);
+      endDateUTC.setHours(endDateUTC.getHours() - 7);
 
       conditions.push(`p.post_time >= $${paramIndex} AND p.post_time <= $${paramIndex + 1}`);
       params.push(startDateUTC.toISOString());
       params.push(endDateUTC.toISOString());
       paramIndex += 2;
+    }
+
+    if (lastPostTime && !postId) {
+      conditions.push(`p.post_time < $${paramIndex}`);
+      params.push(lastPostTime); // client đã gửi ISO string UTC
+      paramIndex++;
     }
 
     if (conditions.length > 0) {
@@ -114,6 +121,7 @@ app.get('/api/products', async (req, res) => {
       product_name: row.product_name || [],
       post_images: row.post_images || []
     }));
+
     res.json(products);
   } catch (error) {
     console.error('Error querying products:', error.message, error.stack);

@@ -19,7 +19,6 @@ const pool = new Pool({
   idleTimeoutMillis: 30000,
 });
 
-// ✅ /api/products - Đã tối ưu
 app.get('/api/products', async (req, res) => {
   const limit = parseInt(req.query.limit) || 6;
   const categoryId = parseInt(req.query.category_id);
@@ -35,10 +34,46 @@ app.get('/api/products', async (req, res) => {
     const conditions = [];
     let paramIndex = 1;
 
-    if (date) {
-      conditions.push(`p.post_time::date = TO_DATE($${paramIndex}, 'DD/MM/YYYY')`);
-      params.push(date);
-      paramIndex++;
+    let query = `
+      SELECT 
+        p.post_id AS id,
+        p.minimum_price AS price,
+        TRIM(p.post_thumbnail) AS post_thumbnail,
+        p.post_time,
+        ARRAY_AGG(DISTINCT jsonb_build_object(
+          'name', i.name,
+          'price', i.price,
+          'description', i.description,
+          'subcategory_id', i.subcategory_id
+        )) AS product_name
+    `;
+
+    if (fields !== 'minimal' || postId) {
+      query += `,
+        u.name AS user_name,
+        p.user_id,
+        u.phone AS user_phone,
+        u.zalo AS user_zalo,
+        p.post_content,
+        u.address AS user_address,
+        p.post_images,
+        c.name AS category_name,
+        ARRAY_AGG(DISTINCT COALESCE(s.name, '')) AS subcategory_names
+      `;
+    }
+
+    query += `
+      FROM posts p
+      LEFT JOIN post_product_items i ON i.post_id = p.post_id
+    `;
+
+    if (fields !== 'minimal' || postId) {
+      query += `
+        LEFT JOIN "user" u ON u.id = p.user_id
+        LEFT JOIN categories c ON c.id = p.category_id
+        LEFT JOIN post_subcategories ps ON ps.post_id = p.post_id
+        LEFT JOIN subcategories s ON s.id = ps.subcategory_id
+      `;
     }
 
     if (postId) {
@@ -64,6 +99,12 @@ app.get('/api/products', async (req, res) => {
         paramIndex++;
       }
 
+      if (date) {
+        conditions.push(`p.post_time::date = TO_DATE($${paramIndex}, 'DD/MM/YYYY')`);
+        params.push(date);
+        paramIndex++;
+      }
+
       if (lastPostTime) {
         conditions.push(`p.post_time < $${paramIndex}`);
         params.push(lastPostTime);
@@ -71,76 +112,28 @@ app.get('/api/products', async (req, res) => {
       }
     }
 
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    if (conditions.length > 0) {
+      query += ` WHERE ` + conditions.join(' AND ');
+    }
 
-    const baseQuery = `
-      WITH filtered_posts AS (
-        SELECT p.*
-        FROM posts p
-        ${whereClause}
-        ORDER BY p.post_time DESC
-        LIMIT $${paramIndex}
-      )
-    `;
-
-    params.push(limit);
-
-    let selectFields = `
-      p.post_id AS id,
-      p.minimum_price AS price,
-      TRIM(p.post_thumbnail) AS post_thumbnail,
-      p.post_time,
-      ARRAY_AGG(DISTINCT jsonb_build_object(
-        'name', i.name,
-        'price', i.price,
-        'description', i.description,
-        'subcategory_id', i.subcategory_id
-      )) AS product_name
-    `;
-
-    let joins = `
-      LEFT JOIN post_product_items i ON i.post_id = p.post_id
-    `;
-
-    let groupBy = `
+    query += `
       GROUP BY p.post_id, p.minimum_price, p.post_thumbnail, p.post_time
     `;
 
     if (fields !== 'minimal' || postId) {
-      selectFields += `,
-        u.name AS user_name,
-        p.user_id,
-        u.phone AS user_phone,
-        u.zalo AS user_zalo,
-        p.post_content,
-        u.address AS user_address,
-        p.post_images,
-        c.name AS category_name,
-        ARRAY_AGG(DISTINCT COALESCE(s.name, '')) AS subcategory_names
-      `;
-
-      joins += `
-        LEFT JOIN "user" u ON p.user_id = u.id
-        LEFT JOIN categories c ON p.category_id = c.id
-        LEFT JOIN post_subcategories ps ON ps.post_id = p.post_id
-        LEFT JOIN subcategories s ON ps.subcategory_id = s.id
-      `;
-
-      groupBy += `,
+      query += `,
         u.name, p.user_id, u.phone, u.zalo, p.post_content, u.address, p.post_images, c.name
       `;
     }
 
-    const finalQuery = `
-      ${baseQuery}
-      SELECT ${selectFields}
-      FROM filtered_posts p
-      ${joins}
-      ${groupBy}
+    query += `
       ORDER BY p.post_time DESC
+      LIMIT $${paramIndex}
     `;
 
-    const result = await pool.query(finalQuery, params);
+    params.push(limit);
+
+    const result = await pool.query(query, params);
 
     const products = result.rows.map(row => {
       const product = {
@@ -173,6 +166,7 @@ app.get('/api/products', async (req, res) => {
     res.status(500).json({ error: 'Server error', message: error.message });
   }
 });
+
 
 // Các endpoint khác giữ nguyên
 app.get('/api/categories', async (req, res) => {

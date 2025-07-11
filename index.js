@@ -39,8 +39,7 @@ app.get('/api/products', async (req, res) => {
         u.phone AS user_phone, 
         u.zalo AS user_zalo, 
         p.post_content, 
-        u.address AS user_address, 
-        p.post_images, 
+        u.address AS user_address,
         c.name AS category_name, 
         ARRAY_AGG(DISTINCT COALESCE(s.name, '')) AS subcategory_names,
         ARRAY_AGG(

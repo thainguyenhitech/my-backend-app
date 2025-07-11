@@ -1,11 +1,13 @@
 const express = require('express');
 const { Pool } = require('pg');
 const cors = require('cors');
+const compression = require('compression');
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
+app.use(compression());
 
 const pool = new Pool({
   user: process.env.DB_USER,
@@ -13,6 +15,8 @@ const pool = new Pool({
   database: process.env.DB_NAME,
   password: process.env.DB_PASS,
   port: parseInt(process.env.DB_PORT || 5432),
+  max: 20,
+  idleTimeoutMillis: 30000
 });
 
 app.get('/api/products', async (req, res) => {
@@ -62,10 +66,18 @@ app.get('/api/products', async (req, res) => {
 
     query += `
       FROM posts p
-      LEFT JOIN "user" u ON p.user_id = u.id
-      LEFT JOIN categories c ON p.category_id = c.id
-      LEFT JOIN post_subcategories ps ON ps.post_id = p.post_id
-      LEFT JOIN subcategories s ON ps.subcategory_id = s.id
+    `;
+
+    if (fields !== 'minimal' || postId) {
+      query += `
+        LEFT JOIN "user" u ON p.user_id = u.id
+        LEFT JOIN categories c ON p.category_id = c.id
+        LEFT JOIN post_subcategories ps ON ps.post_id = p.post_id
+        LEFT JOIN subcategories s ON ps.subcategory_id = s.id
+      `;
+    }
+
+    query += `
       LEFT JOIN post_product_items i ON i.post_id = p.post_id
     `;
 
@@ -156,7 +168,7 @@ app.get('/api/products', async (req, res) => {
       return product;
     });
 
-    res.set('Cache-Control', 'public, max-age=300');
+    res.set('Cache-Control', 'public, max-age=60');
     res.json(products);
   } catch (error) {
     console.error('Error querying products:', error.message, error.stack);

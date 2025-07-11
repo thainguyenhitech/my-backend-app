@@ -32,8 +32,7 @@ app.get('/api/products', async (req, res) => {
     let query = `
       SELECT 
         p.post_id AS id, 
-        p.minimum_price AS price, 
-        p.post_thumbnail,
+        p.minimum_price AS price,
         p.post_time, 
         u.name AS user_name,
         p.user_id,

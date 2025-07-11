@@ -34,7 +34,7 @@ app.get('/api/products', async (req, res) => {
       SELECT 
         p.post_id AS id, 
         p.minimum_price AS price, 
-        p.post_thumbnail,
+        TRIM(p.post_thumbnail) AS post_thumbnail, 
         p.post_time,
         ARRAY_AGG(
           jsonb_build_object(
@@ -134,11 +134,27 @@ app.get('/api/products', async (req, res) => {
 
     const result = await pool.query(query, params);
 
-    const products = result.rows.map(row => ({
-      ...row,
-      product_name: row.product_name || [],
-      post_images: row.post_images || []
-    }));
+    const products = result.rows.map(row => {
+      const product = {
+        id: row.id,
+        price: row.price,
+        post_thumbnail: row.post_thumbnail,
+        post_time: row.post_time,
+        product_name: row.product_name || []
+      };
+      if (fields !== 'minimal' || postId) {
+        product.user_name = row.user_name;
+        product.user_id = row.user_id;
+        product.user_phone = row.user_phone;
+        product.user_zalo = row.user_zalo;
+        product.post_content = row.post_content;
+        product.user_address = row.user_address;
+        product.post_images = row.post_images || [];
+        product.category_name = row.category_name;
+        product.subcategory_names = row.subcategory_names || [];
+      }
+      return product;
+    });
 
     res.set('Cache-Control', 'public, max-age=300');
     res.json(products);
@@ -148,6 +164,7 @@ app.get('/api/products', async (req, res) => {
   }
 });
 
+// Các endpoint khác giữ nguyên
 app.get('/api/categories', async (req, res) => {
   const categoryId = parseInt(req.query.category_id);
   const subcategoryId = parseInt(req.query.subcategory_id);

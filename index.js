@@ -33,14 +33,7 @@ app.get('/api/products', async (req, res) => {
       SELECT 
         p.post_id AS id, 
         p.minimum_price AS price,
-        p.post_time, 
-        u.name AS user_name,
-        p.user_id,
-        u.phone AS user_phone, 
-        u.zalo AS user_zalo, 
-        p.post_content, 
-        u.address AS user_address,
-        c.name AS category_name, 
+        p.post_time
         ARRAY_AGG(DISTINCT COALESCE(s.name, '')) AS subcategory_names,
         ARRAY_AGG(
           jsonb_build_object(

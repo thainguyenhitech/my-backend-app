@@ -23,6 +23,7 @@ app.get('/api/products', async (req, res) => {
   const date = req.query.date || null;
   const lastPostTime = req.query.last_post_time;
   const postId = req.query.post_id;
+  const fields = req.query.fields;
 
   try {
     const params = [];
@@ -34,16 +35,7 @@ app.get('/api/products', async (req, res) => {
         p.post_id AS id, 
         p.minimum_price AS price, 
         p.post_thumbnail,
-        p.post_time, 
-        u.name AS user_name,
-        p.user_id,
-        u.phone AS user_phone, 
-        u.zalo AS user_zalo, 
-        p.post_content, 
-        u.address AS user_address, 
-        p.post_images, 
-        c.name AS category_name, 
-        ARRAY_AGG(DISTINCT COALESCE(s.name, '')) AS subcategory_names,
+        p.post_time,
         ARRAY_AGG(
           jsonb_build_object(
             'name', i.name,
@@ -52,6 +44,23 @@ app.get('/api/products', async (req, res) => {
             'subcategory_id', i.subcategory_id
           )
         ) AS product_name
+    `;
+
+    if (fields !== 'minimal' || postId) {
+      query += `,
+        u.name AS user_name,
+        p.user_id,
+        u.phone AS user_phone, 
+        u.zalo AS user_zalo, 
+        p.post_content, 
+        u.address AS user_address, 
+        p.post_images, 
+        c.name AS category_name, 
+        ARRAY_AGG(DISTINCT COALESCE(s.name, '')) AS subcategory_names
+      `;
+    }
+
+    query += `
       FROM posts p
       LEFT JOIN "user" u ON p.user_id = u.id
       LEFT JOIN categories c ON p.category_id = c.id
@@ -60,7 +69,6 @@ app.get('/api/products', async (req, res) => {
       LEFT JOIN post_product_items i ON i.post_id = p.post_id
     `;
 
-    // Điều kiện lọc
     if (postId) {
       conditions.push(`p.post_id::text = $${paramIndex}`);
       params.push(postId);
@@ -109,9 +117,13 @@ app.get('/api/products', async (req, res) => {
     }
 
     query += `
-      GROUP BY p.post_id, p.minimum_price, p.post_thumbnail, p.post_time, 
-               u.name, p.user_id, u.phone, u.zalo, p.post_content, 
-               u.address, p.post_images, c.name
+      GROUP BY p.post_id, p.minimum_price, p.post_thumbnail, p.post_time
+    `;
+    if (fields !== 'minimal' || postId) {
+      query += `, u.name, p.user_id, u.phone, u.zalo, p.post_content, u.address, p.post_images, c.name`;
+    }
+
+    query += `
       ORDER BY p.post_time DESC
       LIMIT $${paramIndex}
     `;
@@ -128,6 +140,7 @@ app.get('/api/products', async (req, res) => {
       post_images: row.post_images || []
     }));
 
+    res.set('Cache-Control', 'public, max-age=300');
     res.json(products);
   } catch (error) {
     console.error('Error querying products:', error.message, error.stack);
@@ -135,7 +148,6 @@ app.get('/api/products', async (req, res) => {
   }
 });
 
-// API để lấy category_name và subcategory_name (giữ nguyên)
 app.get('/api/categories', async (req, res) => {
   const categoryId = parseInt(req.query.category_id);
   const subcategoryId = parseInt(req.query.subcategory_id);
@@ -170,6 +182,7 @@ app.get('/api/categories', async (req, res) => {
       }
     }
 
+    res.set('Cache-Control', 'public, max-age=3600');
     res.json({
       category_name: categoryName || 'Danh Mục',
       subcategory_name: subcategoryName || null
@@ -180,7 +193,6 @@ app.get('/api/categories', async (req, res) => {
   }
 });
 
-// API lấy danh sách môn thể thao (Sport) - Chuyển sang dùng pool
 app.get('/api/sports', async (req, res) => {
   try {
     const query = `
@@ -189,6 +201,7 @@ app.get('/api/sports', async (req, res) => {
       ORDER BY name ASC
     `;
     const result = await pool.query(query);
+    res.set('Cache-Control', 'public, max-age=3600');
     res.json(result.rows);
   } catch (error) {
     console.error(error);
@@ -196,7 +209,6 @@ app.get('/api/sports', async (req, res) => {
   }
 });
 
-// API lấy danh sách sub-area theo môn thể thao - Chuyển sang dùng pool
 app.get('/api/sports/:sportId/sub-areas', async (req, res) => {
   const sportId = parseInt(req.params.sportId);
 
@@ -215,6 +227,7 @@ app.get('/api/sports/:sportId/sub-areas', async (req, res) => {
       ORDER BY sa.name ASC
     `;
     const result = await pool.query(query, [sportId]);
+    res.set('Cache-Control', 'public, max-age=3600');
     res.json(result.rows);
   } catch (error) {
     console.error(error);
@@ -222,7 +235,6 @@ app.get('/api/sports/:sportId/sub-areas', async (req, res) => {
   }
 });
 
-// API lấy danh sách sub-area theo area - Chuyển sang dùng pool
 app.get('/api/sub-areas/area/:areaId', async (req, res) => {
   const areaId = parseInt(req.params.areaId);
 
@@ -248,6 +260,7 @@ app.get('/api/sub-areas/area/:areaId', async (req, res) => {
         sa.name ASC
     `;
     const result = await pool.query(query, [areaId]);
+    res.set('Cache-Control', 'public, max-age=3600');
     res.json(result.rows);
   } catch (error) {
     console.error(error);
@@ -255,7 +268,6 @@ app.get('/api/sub-areas/area/:areaId', async (req, res) => {
   }
 });
 
-// API lấy danh sách cửa hàng theo sub_area - Chuyển sang dùng pool
 app.get('/api/stores/sub-area/:subAreaId', async (req, res) => {
   const subAreaId = parseInt(req.params.subAreaId);
 
@@ -273,6 +285,7 @@ app.get('/api/stores/sub-area/:subAreaId', async (req, res) => {
       ORDER BY s.name ASC
     `;
     const result = await pool.query(query, [subAreaId]);
+    res.set('Cache-Control', 'public, max-age=3600');
     res.json(result.rows);
   } catch (error) {
     console.error(error);
@@ -280,7 +293,6 @@ app.get('/api/stores/sub-area/:subAreaId', async (req, res) => {
   }
 });
 
-// API lấy danh sách security theo ward_id - Chuyển sang dùng pool
 app.get('/api/security/by-ward', async (req, res) => {
   try {
     const query = `
@@ -290,6 +302,7 @@ app.get('/api/security/by-ward', async (req, res) => {
       ORDER BY name ASC
     `;
     const result = await pool.query(query);
+    res.set('Cache-Control', 'public, max-age=3600');
     res.json(result.rows);
   } catch (error) {
     console.error(error);
@@ -297,7 +310,6 @@ app.get('/api/security/by-ward', async (req, res) => {
   }
 });
 
-// API lấy danh sách security theo area_id - Chuyển sang dùng pool
 app.get('/api/security/by-area', async (req, res) => {
   try {
     const query = `
@@ -308,6 +320,7 @@ app.get('/api/security/by-area', async (req, res) => {
       ORDER BY s.name ASC
     `;
     const result = await pool.query(query);
+    res.set('Cache-Control', 'public, max-age=3600');
     res.json(result.rows);
   } catch (error) {
     console.error(error);
@@ -315,7 +328,6 @@ app.get('/api/security/by-area', async (req, res) => {
   }
 });
 
-// API lấy danh sách medical theo ward_id - Chuyển sang dùng pool
 app.get('/api/medical/by-ward', async (req, res) => {
   try {
     const query = `
@@ -325,6 +337,7 @@ app.get('/api/medical/by-ward', async (req, res) => {
       ORDER BY name ASC
     `;
     const result = await pool.query(query);
+    res.set('Cache-Control', 'public, max-age=3600');
     res.json(result.rows);
   } catch (error) {
     console.error(error);
@@ -332,7 +345,6 @@ app.get('/api/medical/by-ward', async (req, res) => {
   }
 });
 
-// API lấy danh sách medical theo area_id - Chuyển sang dùng pool
 app.get('/api/medical/by-area', async (req, res) => {
   try {
     const query = `
@@ -343,6 +355,7 @@ app.get('/api/medical/by-area', async (req, res) => {
       ORDER BY m.name ASC
     `;
     const result = await pool.query(query);
+    res.set('Cache-Control', 'public, max-age=3600');
     res.json(result.rows);
   } catch (error) {
     console.error(error);
@@ -350,7 +363,6 @@ app.get('/api/medical/by-area', async (req, res) => {
   }
 });
 
-// API lấy danh sách tất cả area - Chuyển sang dùng pool
 app.get('/api/areas', async (req, res) => {
   try {
     const query = `
@@ -358,6 +370,7 @@ app.get('/api/areas', async (req, res) => {
       FROM area
     `;
     const result = await pool.query(query);
+    res.set('Cache-Control', 'public, max-age=3600');
     res.json(result.rows);
   } catch (error) {
     console.error(error);
@@ -365,7 +378,6 @@ app.get('/api/areas', async (req, res) => {
   }
 });
 
-// Khởi động server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Backend server running on http://0.0.0.0:${PORT}`);

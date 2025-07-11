@@ -1,57 +1,21 @@
 const express = require('express');
 const { Pool } = require('pg');
 const cors = require('cors');
-const compression = require('compression');
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
-app.use(compression());
-app.set('etag', 'strong');
 
-// Database configuration
-const DB_CONFIG = {
-  user: process.env.DB_USER || 'postgres',
-  host: process.env.DB_HOST || 'localhost',
-  database: process.env.DB_NAME || 'mygrandpark',
-  password: process.env.DB_PASS || '',
+const pool = new Pool({
+  user: process.env.DB_USER,
+  host: process.env.DB_HOST,
+  database: process.env.DB_NAME,
+  password: process.env.DB_PASS,
   port: parseInt(process.env.DB_PORT || 5432),
-  max: 20,
-  idleTimeoutMillis: 30000
-};
-console.log('DB Config:', DB_CONFIG);
-
-const pool = new Pool(DB_CONFIG);
-
-// Database connection with retry
-let dbConnected = false;
-const connectWithRetry = async (retries = 5, interval = 5000) => {
-  for (let i = 0; i < retries; i++) {
-    try {
-      await pool.query('SELECT NOW()');
-      console.log('Database connected successfully');
-      dbConnected = true;
-      return;
-    } catch (err) {
-      console.error(`Database connection attempt ${i + 1} failed:`, err.message);
-      if (i < retries - 1) await new Promise(resolve => setTimeout(resolve, interval));
-    }
-  }
-  console.error('Database connection failed after retries, APIs may fail');
-};
-connectWithRetry();
-
-pool.on('error', (err, client) => {
-  console.error('Unexpected error on idle client:', err.message, err.stack);
-  dbConnected = false;
 });
 
 app.get('/api/products', async (req, res) => {
-  if (!dbConnected) {
-    return res.status(503).json({ error: 'Service unavailable', message: 'Database not connected' });
-  }
-
   const limit = parseInt(req.query.limit) || 6;
   const categoryId = parseInt(req.query.category_id);
   const subcategoryId = parseInt(req.query.subcategory_id);
@@ -59,7 +23,6 @@ app.get('/api/products', async (req, res) => {
   const date = req.query.date || null;
   const lastPostTime = req.query.last_post_time;
   const postId = req.query.post_id;
-  const fields = req.query.fields;
 
   try {
     const params = [];
@@ -70,13 +33,8 @@ app.get('/api/products', async (req, res) => {
       SELECT 
         p.post_id AS id, 
         p.minimum_price AS price, 
-        TRIM(p.post_thumbnail) AS post_thumbnail, 
-        p.post_time,
-        ARRAY_AGG(i.name) AS product_name
-    `;
-
-    if (fields !== 'minimal' || postId) {
-      query += `,
+        p.post_thumbnail,
+        p.post_time, 
         u.name AS user_name,
         p.user_id,
         u.phone AS user_phone, 
@@ -85,27 +43,24 @@ app.get('/api/products', async (req, res) => {
         u.address AS user_address, 
         p.post_images, 
         c.name AS category_name, 
-        ARRAY_AGG(DISTINCT COALESCE(s.name, '')) AS subcategory_names
-      `;
-    }
-
-    query += `
+        ARRAY_AGG(DISTINCT COALESCE(s.name, '')) AS subcategory_names,
+        ARRAY_AGG(
+          jsonb_build_object(
+            'name', i.name,
+            'price', i.price,
+            'description', i.description,
+            'subcategory_id', i.subcategory_id
+          )
+        ) AS product_name
       FROM posts p
-    `;
-
-    if (fields !== 'minimal' || postId) {
-      query += `
-        LEFT JOIN "user" u ON p.user_id = u.id
-        LEFT JOIN categories c ON p.category_id = c.id
-        LEFT JOIN post_subcategories ps ON ps.post_id = p.post_id
-        LEFT JOIN subcategories s ON ps.subcategory_id = s.id
-      `;
-    }
-
-    query += `
+      LEFT JOIN "user" u ON p.user_id = u.id
+      LEFT JOIN categories c ON p.category_id = c.id
+      LEFT JOIN post_subcategories ps ON ps.post_id = p.post_id
+      LEFT JOIN subcategories s ON ps.subcategory_id = s.id
       LEFT JOIN post_product_items i ON i.post_id = p.post_id
     `;
 
+    // Điều kiện lọc
     if (postId) {
       conditions.push(`p.post_id::text = $${paramIndex}`);
       params.push(postId);
@@ -154,13 +109,9 @@ app.get('/api/products', async (req, res) => {
     }
 
     query += `
-      GROUP BY p.post_id, p.minimum_price, p.post_thumbnail, p.post_time
-    `;
-    if (fields !== 'minimal' || postId) {
-      query += `, u.name, p.user_id, u.phone, u.zalo, p.post_content, u.address, p.post_images, c.name`;
-    }
-
-    query += `
+      GROUP BY p.post_id, p.minimum_price, p.post_thumbnail, p.post_time, 
+               u.name, p.user_id, u.phone, u.zalo, p.post_content, 
+               u.address, p.post_images, c.name
       ORDER BY p.post_time DESC
       LIMIT $${paramIndex}
     `;
@@ -169,33 +120,14 @@ app.get('/api/products', async (req, res) => {
     console.log('[DEBUG] Query:', query);
     console.log('[DEBUG] Params:', params);
 
-    const startTime = Date.now();
     const result = await pool.query(query, params);
-    console.log(`[DEBUG] Query execution time: ${Date.now() - startTime}ms`);
 
-    const products = result.rows.map(row => {
-      const product = {
-        id: row.id,
-        price: row.price,
-        post_thumbnail: row.post_thumbnail,
-        post_time: row.post_time,
-        product_name: row.product_name || []
-      };
-      if (fields !== 'minimal' || postId) {
-        product.user_name = row.user_name;
-        product.user_id = row.user_id;
-        product.user_phone = row.user_phone;
-        product.user_zalo = row.user_zalo;
-        product.post_content = row.post_content;
-        product.user_address = row.user_address;
-        product.post_images = row.post_images || [];
-        product.category_name = row.category_name;
-        product.subcategory_names = row.subcategory_names || [];
-      }
-      return product;
-    });
+    const products = result.rows.map(row => ({
+      ...row,
+      product_name: row.product_name || [],
+      post_images: row.post_images || []
+    }));
 
-    res.set('Cache-Control', 'public, max-age=60');
     res.json(products);
   } catch (error) {
     console.error('Error querying products:', error.message, error.stack);
@@ -203,11 +135,8 @@ app.get('/api/products', async (req, res) => {
   }
 });
 
-// Các endpoint khác giữ nguyên
+// API để lấy category_name và subcategory_name (giữ nguyên)
 app.get('/api/categories', async (req, res) => {
-  if (!dbConnected) {
-    return res.status(503).json({ error: 'Service unavailable', message: 'Database not connected' });
-  }
   const categoryId = parseInt(req.query.category_id);
   const subcategoryId = parseInt(req.query.subcategory_id);
 
@@ -241,21 +170,18 @@ app.get('/api/categories', async (req, res) => {
       }
     }
 
-    res.set('Cache-Control', 'public, max-age=3600');
     res.json({
       category_name: categoryName || 'Danh Mục',
       subcategory_name: subcategoryName || null
     });
   } catch (error) {
-    console.error('Error querying categories:', error.message, error.stack);
-    res.status(500).json({ error: 'Server error', message: error.message });
+    console.error(error);
+    res.status(500).send('Server error');
   }
 });
 
+// API lấy danh sách môn thể thao (Sport) - Chuyển sang dùng pool
 app.get('/api/sports', async (req, res) => {
-  if (!dbConnected) {
-    return res.status(503).json({ error: 'Service unavailable', message: 'Database not connected' });
-  }
   try {
     const query = `
       SELECT id, name
@@ -263,22 +189,19 @@ app.get('/api/sports', async (req, res) => {
       ORDER BY name ASC
     `;
     const result = await pool.query(query);
-    res.set('Cache-Control', 'public, max-age=3600');
     res.json(result.rows);
   } catch (error) {
-    console.error('Error querying sports:', error.message, error.stack);
-    res.status(500).json({ error: 'Server error', message: error.message });
+    console.error(error);
+    res.status(500).send('Server error');
   }
 });
 
+// API lấy danh sách sub-area theo môn thể thao - Chuyển sang dùng pool
 app.get('/api/sports/:sportId/sub-areas', async (req, res) => {
-  if (!dbConnected) {
-    return res.status(503).json({ error: 'Service unavailable', message: 'Database not connected' });
-  }
   const sportId = parseInt(req.params.sportId);
 
   if (!sportId) {
-    return res.status(400).json({ error: 'Bad request', message: 'Sport ID is required' });
+    return res.status(400).send('Sport ID is required');
   }
 
   try {
@@ -292,22 +215,19 @@ app.get('/api/sports/:sportId/sub-areas', async (req, res) => {
       ORDER BY sa.name ASC
     `;
     const result = await pool.query(query, [sportId]);
-    res.set('Cache-Control', 'public, max-age=3600');
     res.json(result.rows);
   } catch (error) {
-    console.error('Error querying sub-areas:', error.message, error.stack);
-    res.status(500).json({ error: 'Server error', message: error.message });
+    console.error(error);
+    res.status(500).send('Server error');
   }
 });
 
+// API lấy danh sách sub-area theo area - Chuyển sang dùng pool
 app.get('/api/sub-areas/area/:areaId', async (req, res) => {
-  if (!dbConnected) {
-    return res.status(503).json({ error: 'Service unavailable', message: 'Database not connected' });
-  }
   const areaId = parseInt(req.params.areaId);
 
   if (!areaId) {
-    return res.status(400).json({ error: 'Bad request', message: 'Area ID is required' });
+    return res.status(400).send('Area ID is required');
   }
 
   try {
@@ -328,22 +248,19 @@ app.get('/api/sub-areas/area/:areaId', async (req, res) => {
         sa.name ASC
     `;
     const result = await pool.query(query, [areaId]);
-    res.set('Cache-Control', 'public, max-age=3600');
     res.json(result.rows);
   } catch (error) {
-    console.error('Error querying sub-areas by area:', error.message, error.stack);
-    res.status(500).json({ error: 'Server error', message: error.message });
+    console.error(error);
+    res.status(500).send('Server error');
   }
 });
 
+// API lấy danh sách cửa hàng theo sub_area - Chuyển sang dùng pool
 app.get('/api/stores/sub-area/:subAreaId', async (req, res) => {
-  if (!dbConnected) {
-    return res.status(503).json({ error: 'Service unavailable', message: 'Database not connected' });
-  }
   const subAreaId = parseInt(req.params.subAreaId);
 
   if (!subAreaId) {
-    return res.status(400).json({ error: 'Bad request', message: 'Sub Area ID is required' });
+    return res.status(400).send('Sub Area ID is required');
   }
 
   try {
@@ -356,18 +273,15 @@ app.get('/api/stores/sub-area/:subAreaId', async (req, res) => {
       ORDER BY s.name ASC
     `;
     const result = await pool.query(query, [subAreaId]);
-    res.set('Cache-Control', 'public, max-age=3600');
     res.json(result.rows);
   } catch (error) {
-    console.error('Error querying stores:', error.message, error.stack);
-    res.status(500).json({ error: 'Server error', message: error.message });
+    console.error(error);
+    res.status(500).send('Server error');
   }
 });
 
+// API lấy danh sách security theo ward_id - Chuyển sang dùng pool
 app.get('/api/security/by-ward', async (req, res) => {
-  if (!dbConnected) {
-    return res.status(503).json({ error: 'Service unavailable', message: 'Database not connected' });
-  }
   try {
     const query = `
       SELECT id, name, hotline, address, link
@@ -376,18 +290,15 @@ app.get('/api/security/by-ward', async (req, res) => {
       ORDER BY name ASC
     `;
     const result = await pool.query(query);
-    res.set('Cache-Control', 'public, max-age=3600');
     res.json(result.rows);
   } catch (error) {
-    console.error('Error querying security by ward:', error.message, error.stack);
-    res.status(500).json({ error: 'Server error', message: error.message });
+    console.error(error);
+    res.status(500).send('Server error');
   }
 });
 
+// API lấy danh sách security theo area_id - Chuyển sang dùng pool
 app.get('/api/security/by-area', async (req, res) => {
-  if (!dbConnected) {
-    return res.status(503).json({ error: 'Service unavailable', message: 'Database not connected' });
-  }
   try {
     const query = `
       SELECT s.id, s.name, s.hotline, s.address, s.link, a.name AS area_name
@@ -397,18 +308,15 @@ app.get('/api/security/by-area', async (req, res) => {
       ORDER BY s.name ASC
     `;
     const result = await pool.query(query);
-    res.set('Cache-Control', 'public, max-age=3600');
     res.json(result.rows);
   } catch (error) {
-    console.error('Error querying security by area:', error.message, error.stack);
-    res.status(500).json({ error: 'Server error', message: error.message });
+    console.error(error);
+    res.status(500).send('Server error');
   }
 });
 
+// API lấy danh sách medical theo ward_id - Chuyển sang dùng pool
 app.get('/api/medical/by-ward', async (req, res) => {
-  if (!dbConnected) {
-    return res.status(503).json({ error: 'Service unavailable', message: 'Database not connected' });
-  }
   try {
     const query = `
       SELECT id, name, hotline, address, link
@@ -417,18 +325,15 @@ app.get('/api/medical/by-ward', async (req, res) => {
       ORDER BY name ASC
     `;
     const result = await pool.query(query);
-    res.set('Cache-Control', 'public, max-age=3600');
     res.json(result.rows);
   } catch (error) {
-    console.error('Error querying medical by ward:', error.message, error.stack);
-    res.status(500).json({ error: 'Server error', message: error.message });
+    console.error(error);
+    res.status(500).send('Server error');
   }
 });
 
+// API lấy danh sách medical theo area_id - Chuyển sang dùng pool
 app.get('/api/medical/by-area', async (req, res) => {
-  if (!dbConnected) {
-    return res.status(503).json({ error: 'Service unavailable', message: 'Database not connected' });
-  }
   try {
     const query = `
       SELECT m.id, m.name, m.hotline, m.address, m.link, a.name AS area_name
@@ -438,44 +343,30 @@ app.get('/api/medical/by-area', async (req, res) => {
       ORDER BY m.name ASC
     `;
     const result = await pool.query(query);
-    res.set('Cache-Control', 'public, max-age=3600');
     res.json(result.rows);
   } catch (error) {
-    console.error('Error querying medical by area:', error.message, error.stack);
-    res.status(500).json({ error: 'Server error', message: error.message });
+    console.error(error);
+    res.status(500).send('Server error');
   }
 });
 
+// API lấy danh sách tất cả area - Chuyển sang dùng pool
 app.get('/api/areas', async (req, res) => {
-  if (!dbConnected) {
-    return res.status(503).json({ error: 'Service unavailable', message: 'Database not connected' });
-  }
   try {
     const query = `
       SELECT id, name AS area_name
       FROM area
     `;
     const result = await pool.query(query);
-    res.set('Cache-Control', 'public, max-age=3600');
     res.json(result.rows);
   } catch (error) {
-    console.error('Error querying areas:', error.message, error.stack);
-    res.status(500).json({ error: 'Server error', message: error.message });
+    console.error(error);
+    res.status(500).send('Server error');
   }
 });
 
-let PORT = process.env.PORT || 3000;
-const startServer = (port) => {
-  app.listen(port, () => {
-    console.log(`Backend server running on http://0.0.0.0:${port}`);
-  }).on('error', (err) => {
-    if (err.code === 'EADDRINUSE') {
-      console.error(`Port ${port} is in use, trying ${port + 1}`);
-      startServer(port + 1);
-    } else {
-      console.error('Server error:', err.message, err.stack);
-      process.exit(-1);
-    }
-  });
-};
-startServer(PORT);
+// Khởi động server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Backend server running on http://0.0.0.0:${PORT}`);
+});

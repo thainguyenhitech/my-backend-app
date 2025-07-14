@@ -217,7 +217,6 @@ app.get('/api/products', async (req, res) => {
       console.log(`[DEBUG] No products found for last_post_time: ${lastPostTime}, params:`, params);
     }
 
-    res.set('Cache-Control', 'public, max-age=60');
     res.json(products);
   } catch (error) {
     console.error('Error querying products:', error.message, error.stack);

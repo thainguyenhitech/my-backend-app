@@ -89,7 +89,6 @@ app.get('/api/products', async (req, res) => {
           p.post_id AS id, 
           p.minimum_price AS price, 
           TRIM(p.post_thumbnail) AS post_thumbnail,
-		  TRIM(p.first_thumbnail) AS first_thumbnail,
           p.post_time,
           ARRAY_AGG(
             jsonb_build_object(
@@ -172,7 +171,7 @@ app.get('/api/products', async (req, res) => {
     }
 
     query += `
-      GROUP BY p.post_id, p.minimum_price, p.post_thumbnail, p.post_time
+      GROUP BY p.post_id, p.minimum_price, p.post_thumbnail, p.first_thumbnail, p.post_time
     `;
     if (fields !== 'minimal' || postId) {
       query += `, u.name, p.user_id, u.phone, u.zalo, p.post_content, u.address, p.post_images, c.name`;

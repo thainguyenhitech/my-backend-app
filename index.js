@@ -71,8 +71,7 @@ app.get('/api/products', async (req, res) => {
         SELECT 
           p.post_id AS id, 
           p.minimum_price AS price, 
-          TRIM(p.post_thumbnail) AS post_thumbnail, 
-		  TRIM(p.first_thumbnail) AS first_thumbnail, 
+          TRIM(p.post_thumbnail) AS post_thumbnail,
           p.post_time,
           COALESCE(ARRAY_AGG(i.name) FILTER (WHERE i.name IS NOT NULL), ARRAY[]::text[]) AS product_name
         FROM posts p
@@ -88,7 +87,8 @@ app.get('/api/products', async (req, res) => {
         SELECT 
           p.post_id AS id, 
           p.minimum_price AS price, 
-          TRIM(p.post_thumbnail) AS post_thumbnail,
+          TRIM(p.post_thumbnail) AS post_thumbnail,	  
+		  TRIM(p.first_thumbnail) AS first_thumbnail, 
           p.post_time,
           ARRAY_AGG(
             jsonb_build_object(
